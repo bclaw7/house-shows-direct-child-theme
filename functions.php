@@ -83,7 +83,6 @@ add_filter( 'wp_mail_from_name', function ( $original_email_from ) {
  * Gravity Forms Registration Form Customizations
  * 
  */
-<?php
 /**
  * House Shows Direct - Unified Registration Handler
  * 
