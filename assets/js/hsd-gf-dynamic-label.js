@@ -6,10 +6,10 @@
 			return;
 		}
 
-		var roleSelector = '#input_' + config.formId + '_' + config.roleFieldId;
+		var roleSelector = 'input[name="input_' + config.roleFieldId + '"]';
 		var nameField = $( '#field_' + config.formId + '_' + config.nameFieldId );
 
-		if ( ! nameField.length ) {
+		if ( ! nameField.length || ! $( roleSelector ).length ) {
 			return;
 		}
 
@@ -25,7 +25,7 @@
 			if ( descriptionElement.length ) {
 				descriptionElement.text( settings.description || '' );
 			} else if ( settings.description ) {
-				descriptionElement = $( '<div>', { 'class': 'gfield_description' } );
+				descriptionElement = $( '<div>', { class: 'gfield_description' } );
 				descriptionElement.text( settings.description );
 				nameField.append( descriptionElement );
 			}
