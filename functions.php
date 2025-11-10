@@ -113,6 +113,9 @@ define('HSD_FIELD_ADDRESS', '24');               // Address field (contains city
 define('HSD_FIELD_GENRE_PERFORMANCE', '20');     // Artist genre / performance type (combined field)
 define('HSD_FIELD_VENUE_CAPACITY', '23');        // Host venue capacity
 define('HSD_FIELD_VENUE_TYPE', '22');            // Host venue type
+define('HSD_FIELD_DISPLAY_NAME_SUPPORTER', '29'); // Supporter name field (conditional)
+define('HSD_FIELD_DISPLAY_NAME_HOST', '28');      // Host/Venue name field (conditional)
+define('HSD_FIELD_DISPLAY_NAME_FAN', '30');       // Fan name field (conditional)
 
 // Membership Product Fields (conditional - one per role)
 define('HSD_FIELD_FAN_MEMBERSHIP', '9');         // Fan membership product field
@@ -231,6 +234,26 @@ function hsd_enqueue_dynamic_display_name_assets( $form, $is_ajax ) {
 	);
 
 	wp_localize_script( $handle, 'hsdDynamicDisplayName', $config );
+}
+
+add_filter( 'gform_pre_submission_' . HSD_REGISTRATION_FORM_ID, 'hsd_merge_role_specific_display_names' );
+
+function hsd_merge_role_specific_display_names( $form ) {
+	$conditional_fields = array(
+		HSD_FIELD_DISPLAY_NAME        => rgpost( 'input_' . HSD_FIELD_DISPLAY_NAME ),
+		HSD_FIELD_DISPLAY_NAME_SUPPORTER => rgpost( 'input_' . HSD_FIELD_DISPLAY_NAME_SUPPORTER ),
+		HSD_FIELD_DISPLAY_NAME_HOST      => rgpost( 'input_' . HSD_FIELD_DISPLAY_NAME_HOST ),
+		HSD_FIELD_DISPLAY_NAME_FAN       => rgpost( 'input_' . HSD_FIELD_DISPLAY_NAME_FAN ),
+	);
+
+	foreach ( $conditional_fields as $value ) {
+		if ( ! empty( $value ) ) {
+			$_POST[ 'input_' . HSD_FIELD_DISPLAY_NAME ] = $value;
+			break;
+		}
+	}
+
+	return $form;
 }
 
 add_action('gform_user_registered', 'hsd_unified_user_setup', 10, 4);
