@@ -20,3 +20,4 @@ git branch -M main
 echo "Ready to push! Run: git push -u origin main"
 echo "Note: You may need to authenticate with GitHub first."
 
+

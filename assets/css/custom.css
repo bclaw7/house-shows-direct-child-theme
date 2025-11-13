@@ -4,4 +4,6 @@
  * Add your custom styles here.
  * This file is automatically enqueued by the child theme.
  */
-
+ .gform_wrapper.gf_browser_chrome form select {
+    padding-top: 0px !important;
+ }
