@@ -123,6 +123,9 @@ define('HSD_FIELD_ARTIST_MEMBERSHIP', '27');       // Artist membership product 
 define('HSD_FIELD_SUPPORTER_MEMBERSHIP', '25');    // Supporter membership product field (add field ID)
 define('HSD_FIELD_HOST_MEMBERSHIP', '26');         // Host membership product field (add field ID)
 
+// Payment Method Field
+define('HSD_FIELD_PAYMENT_METHOD', '11');         // Payment Method radio buttons field
+
 // MemberPress Membership IDs (find in MemberPress > Memberships)
 // Look at the URL when editing: ?page=memberpress-memberships&action=edit&id=XXX
 // Map membership level names (as they appear in dropdown) to MemberPress IDs
@@ -509,6 +512,72 @@ function hsd_setup_woocommerce_customer($user_id, $entry, $include_address = fal
         
         hsd_log("WooCommerce billing address set for vendor User ID: {$user_id}");
     }
+}
+
+// ============================================================================
+// PAYMENT METHOD FIELD VALIDATION
+// ============================================================================
+
+/**
+ * Skip required validation for Payment Method field when all memberships are free
+ * 
+ * This fixes the issue where free memberships hide the payment field via conditional logic,
+ * but Gravity Forms still tries to validate it as required.
+ */
+add_filter('gform_field_validation_' . HSD_REGISTRATION_FORM_ID . '_' . HSD_FIELD_PAYMENT_METHOD, 'hsd_validate_payment_method_conditional', 10, 4);
+
+function hsd_validate_payment_method_conditional($result, $value, $form, $field) {
+    // First, check if the payment method field itself is hidden by conditional logic
+    // If it's hidden, it shouldn't be validated as required
+    if (class_exists('GFCommon') && method_exists('GFCommon', 'is_field_hidden')) {
+        $entry = array();
+        foreach ($form['fields'] as $form_field) {
+            $entry[$form_field->id] = rgpost('input_' . $form_field->id);
+        }
+        
+        if (GFCommon::is_field_hidden($form, $field, $entry)) {
+            $result['is_valid'] = true;
+            $result['message'] = '';
+            hsd_log("Payment Method validation skipped - field is hidden by conditional logic");
+            return $result;
+        }
+    }
+    
+    // Get the user role selection (field ID 5)
+    $user_role = strtolower(trim(rgpost('input_' . HSD_FIELD_USER_ROLE)));
+    
+    if (empty($user_role)) {
+        // No role selected yet, let default validation handle it
+        return $result;
+    }
+    
+    // Map role to corresponding membership field ID
+    $role_to_membership_field = array(
+        'fan'       => HSD_FIELD_FAN_MEMBERSHIP,
+        'supporter' => HSD_FIELD_SUPPORTER_MEMBERSHIP,
+        'host'      => HSD_FIELD_HOST_MEMBERSHIP,
+        'artist'    => HSD_FIELD_ARTIST_MEMBERSHIP,
+    );
+    
+    // Get the membership field ID for the selected role
+    if (!isset($role_to_membership_field[$user_role])) {
+        hsd_log("Unknown user role: {$user_role}");
+        return $result;
+    }
+    
+    $membership_field_id = $role_to_membership_field[$user_role];
+    
+    // Get the membership level value for this role
+    $membership_value = rgpost('input_' . $membership_field_id);
+    
+    // If membership field has a value and it contains "free" (case-insensitive), skip payment validation
+    if (!empty($membership_value) && stripos($membership_value, 'free') !== false) {
+        $result['is_valid'] = true;
+        $result['message'] = '';
+        hsd_log("Payment Method validation skipped - {$user_role} membership is free (value: {$membership_value})");
+    }
+    
+    return $result;
 }
 
 // ============================================================================
