@@ -568,10 +568,42 @@ function hsd_validate_payment_method_conditional($result, $value, $form, $field)
     $membership_field_id = $role_to_membership_field[$user_role];
     
     // Get the membership level value for this role
-    $membership_value = rgpost('input_' . $membership_field_id);
+    $membership_value = trim(rgpost('input_' . $membership_field_id));
     
-    // If membership field has a value and it contains "free" (case-insensitive), skip payment validation
-    if (!empty($membership_value) && stripos($membership_value, 'free') !== false) {
+    if (empty($membership_value)) {
+        // No membership value yet, let default validation handle it
+        return $result;
+    }
+    
+    // Normalize the value for comparison (lowercase, trim)
+    $membership_value_normalized = strtolower($membership_value);
+    
+    // Define the exact free membership values for each role
+    $free_membership_values = array(
+        'fan'       => array('free-fan-membership', 'free fan membership'),
+        'supporter' => array('free-supporter-membership', 'free supporter membership'),
+        'host'      => array('free-host-membership', 'free host membership'),
+        'artist'    => array('free-artist-membership', 'free artist membership'),
+    );
+    
+    // Check if the membership value matches any of the free options for this role
+    $is_free = false;
+    if (isset($free_membership_values[$user_role])) {
+        foreach ($free_membership_values[$user_role] as $free_value) {
+            if ($membership_value_normalized === strtolower($free_value)) {
+                $is_free = true;
+                break;
+            }
+        }
+    }
+    
+    // Also check if value contains "free" as a fallback (case-insensitive)
+    if (!$is_free && stripos($membership_value, 'free') !== false) {
+        $is_free = true;
+    }
+    
+    // If membership is free, skip payment validation
+    if ($is_free) {
         $result['is_valid'] = true;
         $result['message'] = '';
         hsd_log("Payment Method validation skipped - {$user_role} membership is free (value: {$membership_value})");
