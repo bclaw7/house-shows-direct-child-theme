@@ -196,83 +196,102 @@ function hsd_merge_role_specific_display_names( $form ) {
 add_action('gform_user_registered', 'hsd_unified_user_setup', 10, 4);
 
 function hsd_unified_user_setup($user_id, $feed, $entry, $password) {
-    global $HSD_MEMBERSHIP_IDS, $HSD_BUDDYBOSS_TYPES;
-    
-    // Only run on HSD Registration form
-    if ($entry['form_id'] != HSD_REGISTRATION_FORM_ID) {
-        return;
-    }
-    
-    // Get the user role selection
-    $user_type = strtolower(trim(rgar($entry, HSD_FIELD_USER_ROLE)));
-    
-    // Log the registration attempt
-    hsd_log("Starting registration for User ID: {$user_id}, Type: {$user_type}");
-    
-    // Validate user type
-    if (!in_array($user_type, array('fan', 'supporter', 'artist', 'host'))) {
-        hsd_log("ERROR: Invalid user type '{$user_type}' for User ID: {$user_id}");
-        return;
-    }
-    
-    // Store user type as meta
-    update_user_meta($user_id, 'hsd_user_type', $user_type);
-    
-    // Create Dokan vendor for Artists and Hosts
-    if (in_array($user_type, array('artist', 'host'))) {
-        hsd_create_dokan_vendor($user_id, $user_type, $entry);
-    }
-    
-    // Assign MemberPress membership
-    hsd_assign_membership($user_id, $user_type, $entry, $HSD_MEMBERSHIP_IDS);
-    
-    // Set BuddyBoss profile type
-    if (function_exists('bp_set_member_type') && isset($HSD_BUDDYBOSS_TYPES[$user_type])) {
-        hsd_set_buddyboss_profile($user_id, $user_type, $HSD_BUDDYBOSS_TYPES);
-    }
-    
-    // Store role-specific metadata
-    hsd_store_user_metadata($user_id, $user_type, $entry);
-    
-    // Ensure WooCommerce customer data is set (only for non-vendor users)
-    if (class_exists('WC_Customer') && !in_array($user_type, array('artist', 'host'))) {
-        hsd_setup_woocommerce_customer($user_id, $entry, false);
-    }
-    
-    // Store password temporarily for auto-login (will be used by login page script)
-    // Get user object first
-    $user = get_userdata($user_id);
-    if (!$user) {
-        hsd_log("ERROR: Could not get user data for User ID: {$user_id}");
-        return;
-    }
-    
-    // Get username from form field (ID 3) first, fallback to WordPress username
-    $form_username = rgar($entry, HSD_FIELD_USERNAME);
-    $login_username = !empty($form_username) ? $form_username : $user->user_login;
-    
-    // Get password from form field (ID 4) first, fallback to hook parameter
-    $form_password = rgar($entry, HSD_FIELD_PASSWORD);
-    $user_password = !empty($form_password) ? $form_password : $password;
-    
-    // Only store if we have a password (for artists and hosts who need redirect)
-    if (!empty($user_password) && in_array($user_type, array('artist', 'host'))) {
-        $login_token = wp_generate_password(32, false);
-        set_transient('hsd_auto_login_' . $login_token, array(
-            'user_id' => $user_id,
-            'username' => $login_username, // Use username from form field
-            'email' => $user->user_email,
-            'password' => $user_password // Store temporarily for auto-login
-        ), 300); // 5 minutes, auto-deletes
+    // Wrap in try-catch to prevent fatal errors
+    try {
+        global $HSD_MEMBERSHIP_IDS, $HSD_BUDDYBOSS_TYPES;
         
-        // Store token in entry meta for redirect function to retrieve (safely)
-        if (function_exists('gform_update_meta') && isset($entry['id'])) {
-            gform_update_meta($entry['id'], 'hsd_auto_login_token', $login_token);
+        // Safety check: ensure Gravity Forms functions are available
+        if (!function_exists('rgar')) {
+            return;
         }
-        hsd_log("Auto-login token created for User ID: {$user_id} (username: {$login_username}, password from " . (!empty($form_password) ? 'form field' : 'hook parameter') . ")");
+        
+        // Validate entry data
+        if (!is_array($entry) || !isset($entry['form_id'])) {
+            return;
+        }
+        
+        // Only run on HSD Registration form
+        if ($entry['form_id'] != HSD_REGISTRATION_FORM_ID) {
+            return;
+        }
+        
+        // Get the user role selection
+        $user_type = strtolower(trim(rgar($entry, HSD_FIELD_USER_ROLE)));
+        
+        // Log the registration attempt
+        hsd_log("Starting registration for User ID: {$user_id}, Type: {$user_type}");
+        
+        // Validate user type
+        if (!in_array($user_type, array('fan', 'supporter', 'artist', 'host'))) {
+            hsd_log("ERROR: Invalid user type '{$user_type}' for User ID: {$user_id}");
+            return;
+        }
+        
+        // Store user type as meta
+        update_user_meta($user_id, 'hsd_user_type', $user_type);
+        
+        // Create Dokan vendor for Artists and Hosts
+        if (in_array($user_type, array('artist', 'host'))) {
+            hsd_create_dokan_vendor($user_id, $user_type, $entry);
+        }
+        
+        // Assign MemberPress membership
+        hsd_assign_membership($user_id, $user_type, $entry, $HSD_MEMBERSHIP_IDS);
+        
+        // Set BuddyBoss profile type
+        if (function_exists('bp_set_member_type') && isset($HSD_BUDDYBOSS_TYPES[$user_type])) {
+            hsd_set_buddyboss_profile($user_id, $user_type, $HSD_BUDDYBOSS_TYPES);
+        }
+        
+        // Store role-specific metadata
+        hsd_store_user_metadata($user_id, $user_type, $entry);
+        
+        // Ensure WooCommerce customer data is set (only for non-vendor users)
+        if (class_exists('WC_Customer') && !in_array($user_type, array('artist', 'host'))) {
+            hsd_setup_woocommerce_customer($user_id, $entry, false);
+        }
+        
+        // Store password temporarily for auto-login (will be used by login page script)
+        // Get user object first
+        $user = get_userdata($user_id);
+        if (!$user) {
+            hsd_log("ERROR: Could not get user data for User ID: {$user_id}");
+            return;
+        }
+        
+        // Get username from form field (ID 3) first, fallback to WordPress username
+        $form_username = rgar($entry, HSD_FIELD_USERNAME);
+        $login_username = !empty($form_username) ? $form_username : $user->user_login;
+        
+        // Get password from form field (ID 4) first, fallback to hook parameter
+        $form_password = rgar($entry, HSD_FIELD_PASSWORD);
+        $user_password = !empty($form_password) ? $form_password : $password;
+        
+        // Only store if we have a password (for artists and hosts who need redirect)
+        if (!empty($user_password) && in_array($user_type, array('artist', 'host'))) {
+            $login_token = wp_generate_password(32, false);
+            set_transient('hsd_auto_login_' . $login_token, array(
+                'user_id' => $user_id,
+                'username' => $login_username, // Use username from form field
+                'email' => $user->user_email,
+                'password' => $user_password // Store temporarily for auto-login
+            ), 300); // 5 minutes, auto-deletes
+            
+            // Store token in entry meta for redirect function to retrieve (safely)
+            if (function_exists('gform_update_meta') && isset($entry['id'])) {
+                gform_update_meta($entry['id'], 'hsd_auto_login_token', $login_token);
+            }
+            hsd_log("Auto-login token created for User ID: {$user_id} (username: {$login_username}, password from " . (!empty($form_password) ? 'form field' : 'hook parameter') . ")");
+        }
+        
+        hsd_log("Registration complete for User ID: {$user_id}");
+    } catch (Exception $e) {
+        // Log error but don't break the site
+        if (function_exists('hsd_log')) {
+            hsd_log("ERROR in hsd_unified_user_setup: " . $e->getMessage());
+        }
+        // Silently fail - don't break registration
     }
-    
-    hsd_log("Registration complete for User ID: {$user_id}");
 }
 
 // ============================================================================
@@ -863,79 +882,91 @@ function hsd_add_auto_login_script_to_login_page() {
 add_filter('gform_confirmation_' . HSD_REGISTRATION_FORM_ID, 'hsd_redirect_vendors_to_store_settings', 10, 4);
 
 function hsd_redirect_vendors_to_store_settings($confirmation, $form, $entry, $ajax) {
-    // Validate entry data
-    if (!is_array($entry) || !isset($entry['id'])) {
-        return $confirmation; // Return unchanged if entry is invalid
-    }
-    
-    // Only redirect artists and hosts (both get Dokan vendor accounts)
-    $user_type = strtolower(trim(rgar($entry, HSD_FIELD_USER_ROLE)));
-    
-    if (!in_array($user_type, array('artist', 'host'))) {
-        return $confirmation; // Return unchanged for fans and supporters
-    }
-    
-    $store_settings_url = 'https://houseshowsdirect.com/dashboard/settings/store/';
-    
-    // If confirmation is already a redirect array, modify it
-    if (is_array($confirmation) && isset($confirmation['redirect'])) {
-        $confirmation['redirect'] = $store_settings_url;
-        return $confirmation;
-    }
-    
-    // Get auto-login token from entry meta (safely)
-    $login_token = '';
-    if (isset($entry['id']) && function_exists('gform_get_meta')) {
-        $login_token = gform_get_meta($entry['id'], 'hsd_auto_login_token');
-    }
-    
-    $email = rgar($entry, '1'); // Email field
-    
-    // If no token, just redirect to store settings (user will need to log in manually)
-    if (empty($login_token)) {
-        // Fallback: simple redirect without auto-login
-        $js_redirect = '<script type="text/javascript">
-            setTimeout(function() {
-                window.location.href = "' . esc_js($store_settings_url) . '";
-            }, 2000);
-        </script>';
-    } else {
-        // Redirect to login page with auto-login script
-        // This will auto-fill the form, solve the captcha, and submit
-        $login_url = 'https://houseshowsdirect.com/login/';
-        
-        // JavaScript to auto-login through MemberPress login form
-        $js_redirect = '<script type="text/javascript">
-            (function() {
-                var loginUrl = "' . esc_js($login_url) . '";
-                var redirectUrl = "' . esc_js($store_settings_url) . '";
-                var token = "' . esc_js($login_token) . '";
-                
-                // Redirect to login page first
-                window.location.href = loginUrl + (loginUrl.indexOf("?") > -1 ? "&" : "?") + "hsd_auto_login=" + token + "&redirect_to=" + encodeURIComponent(redirectUrl);
-            })();
-        </script>';
-    }
-    
-    // Also add a script that will run on the login page to auto-submit
-    // This will be handled by a separate function that hooks into the login page
-    
-    // Handle different confirmation formats
-    if (is_string($confirmation)) {
-        // String confirmation - append JavaScript
-        return $confirmation . $js_redirect;
-    } elseif (is_array($confirmation)) {
-        // Array confirmation - add to message if exists, otherwise create redirect
-        if (isset($confirmation['message'])) {
-            $confirmation['message'] .= $js_redirect;
-        } else {
-            $confirmation['redirect'] = $store_settings_url;
+    // Wrap in try-catch to prevent fatal errors
+    try {
+        // Safety check: ensure Gravity Forms functions are available
+        if (!function_exists('rgar')) {
+            return $confirmation;
         }
+        
+        // Validate entry data
+        if (!is_array($entry) || !isset($entry['id'])) {
+            return $confirmation; // Return unchanged if entry is invalid
+        }
+    
+        // Only redirect artists and hosts (both get Dokan vendor accounts)
+        $user_type = strtolower(trim(rgar($entry, HSD_FIELD_USER_ROLE)));
+        
+        if (!in_array($user_type, array('artist', 'host'))) {
+            return $confirmation; // Return unchanged for fans and supporters
+        }
+        
+        $store_settings_url = 'https://houseshowsdirect.com/dashboard/settings/store/';
+        
+        // If confirmation is already a redirect array, modify it
+        if (is_array($confirmation) && isset($confirmation['redirect'])) {
+            $confirmation['redirect'] = $store_settings_url;
+            return $confirmation;
+        }
+        
+        // Get auto-login token from entry meta (safely)
+        $login_token = '';
+        if (isset($entry['id']) && function_exists('gform_get_meta')) {
+            $login_token = gform_get_meta($entry['id'], 'hsd_auto_login_token');
+        }
+        
+        $email = rgar($entry, '1'); // Email field
+        
+        // If no token, just redirect to store settings (user will need to log in manually)
+        if (empty($login_token)) {
+            // Fallback: simple redirect without auto-login
+            $js_redirect = '<script type="text/javascript">
+                setTimeout(function() {
+                    window.location.href = "' . esc_js($store_settings_url) . '";
+                }, 2000);
+            </script>';
+        } else {
+            // Redirect to login page with auto-login script
+            // This will auto-fill the form, solve the captcha, and submit
+            $login_url = 'https://houseshowsdirect.com/login/';
+            
+            // JavaScript to auto-login through MemberPress login form
+            $js_redirect = '<script type="text/javascript">
+                (function() {
+                    var loginUrl = "' . esc_js($login_url) . '";
+                    var redirectUrl = "' . esc_js($store_settings_url) . '";
+                    var token = "' . esc_js($login_token) . '";
+                    
+                    // Redirect to login page first
+                    window.location.href = loginUrl + (loginUrl.indexOf("?") > -1 ? "&" : "?") + "hsd_auto_login=" + token + "&redirect_to=" + encodeURIComponent(redirectUrl);
+                })();
+            </script>';
+        }
+        
+        // Handle different confirmation formats
+        if (is_string($confirmation)) {
+            // String confirmation - append JavaScript
+            return $confirmation . $js_redirect;
+        } elseif (is_array($confirmation)) {
+            // Array confirmation - add to message if exists, otherwise create redirect
+            if (isset($confirmation['message'])) {
+                $confirmation['message'] .= $js_redirect;
+            } else {
+                $confirmation['redirect'] = $store_settings_url;
+            }
+            return $confirmation;
+        }
+        
+        // Fallback: return redirect array
+        return array('redirect' => $store_settings_url);
+    } catch (Exception $e) {
+        // Log error but don't break the site
+        if (function_exists('hsd_log')) {
+            hsd_log("ERROR in hsd_redirect_vendors_to_store_settings: " . $e->getMessage());
+        }
+        // Return original confirmation on error
         return $confirmation;
     }
-    
-    // Fallback: return redirect array
-    return array('redirect' => $store_settings_url);
 }
 
 // ============================================================================
