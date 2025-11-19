@@ -670,41 +670,70 @@ add_action('gform_post_submission_' . HSD_REGISTRATION_FORM_ID, 'hsd_ensure_user
 add_action('wp_footer', 'hsd_add_auto_login_script_to_login_page');
 
 function hsd_add_auto_login_script_to_login_page() {
-    // Check if auto-login parameter is present
-    if (!isset($_GET['hsd_auto_login']) || empty($_GET['hsd_auto_login'])) {
-        return;
-    }
-    
-    // Only run on login page (check URL or page slug)
-    $current_url = $_SERVER['REQUEST_URI'] ?? '';
-    $is_login_page = (
-        strpos($current_url, '/login') !== false ||
-        is_page('login') ||
-        (function_exists('bp_is_register_page') && bp_is_register_page())
-    );
-    
-    // Don't run if user is already logged in (unless on login page)
-    if (!$is_login_page && is_user_logged_in()) {
-        return;
-    }
-    
-    $token = sanitize_text_field($_GET['hsd_auto_login']);
-    $redirect_to = isset($_GET['redirect_to']) ? esc_url_raw($_GET['redirect_to']) : '';
-    $store_settings_url = 'https://houseshowsdirect.com/dashboard/settings/store/';
-    
-    // Get login credentials from transient
-    $login_data = get_transient('hsd_auto_login_' . $token);
-    
-    if (!$login_data || !isset($login_data['username']) || !isset($login_data['password'])) {
-        return; // Token expired or invalid
-    }
-    
-    $username = esc_js($login_data['username']);
-    $password = esc_js($login_data['password']);
-    $math_answer = '17'; // 12 + 5 = 17
-    
-    // Delete the transient immediately for security
-    delete_transient('hsd_auto_login_' . $token);
+    // Wrap in try-catch to prevent fatal errors
+    try {
+        // Check if auto-login parameter is present - exit early if not
+        if (!isset($_GET['hsd_auto_login']) || empty($_GET['hsd_auto_login'])) {
+            return;
+        }
+        
+        // Only run on login page (check URL or page slug)
+        $current_url = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
+        $is_login_page = false;
+        
+        // Check if URL contains /login
+        if (!empty($current_url) && strpos($current_url, '/login') !== false) {
+            $is_login_page = true;
+        }
+        
+        // Check if it's the login page via WordPress function
+        if (!$is_login_page && function_exists('is_page') && is_page('login')) {
+            $is_login_page = true;
+        }
+        
+        // Check if it's BuddyPress register page
+        if (!$is_login_page && function_exists('bp_is_register_page') && bp_is_register_page()) {
+            $is_login_page = true;
+        }
+        
+        // Only proceed if we're on a login page
+        if (!$is_login_page) {
+            return;
+        }
+        
+        // Don't run if user is already logged in
+        if (is_user_logged_in()) {
+            return;
+        }
+        
+        // Sanitize token
+        $token = isset($_GET['hsd_auto_login']) ? sanitize_text_field($_GET['hsd_auto_login']) : '';
+        if (empty($token)) {
+            return;
+        }
+        
+        $redirect_to = isset($_GET['redirect_to']) ? esc_url_raw($_GET['redirect_to']) : '';
+        $store_settings_url = 'https://houseshowsdirect.com/dashboard/settings/store/';
+        
+        // Get login credentials from transient
+        $login_data = get_transient('hsd_auto_login_' . $token);
+        
+        // Exit if no valid login data
+        if (!$login_data || !is_array($login_data) || !isset($login_data['username']) || !isset($login_data['password'])) {
+            return; // Token expired or invalid
+        }
+        
+        // Validate we have required data
+        if (empty($login_data['username']) || empty($login_data['password'])) {
+            return;
+        }
+        
+        $username = esc_js($login_data['username']);
+        $password = esc_js($login_data['password']);
+        $math_answer = '17'; // 12 + 5 = 17
+        
+        // Delete the transient immediately for security
+        delete_transient('hsd_auto_login_' . $token);
     
     // JavaScript to auto-fill and submit login form
     ?>
@@ -803,6 +832,14 @@ function hsd_add_auto_login_script_to_login_page() {
     })();
     </script>
     <?php
+    } catch (Exception $e) {
+        // Log error but don't break the site
+        if (function_exists('hsd_log')) {
+            hsd_log("Error in auto-login script: " . $e->getMessage());
+        }
+        // Silently fail - don't output anything
+        return;
+    }
 }
 
 /**
@@ -816,6 +853,11 @@ function hsd_add_auto_login_script_to_login_page() {
 add_filter('gform_confirmation_' . HSD_REGISTRATION_FORM_ID, 'hsd_redirect_vendors_to_store_settings', 10, 4);
 
 function hsd_redirect_vendors_to_store_settings($confirmation, $form, $entry, $ajax) {
+    // Validate entry data
+    if (!is_array($entry) || !isset($entry['id'])) {
+        return $confirmation; // Return unchanged if entry is invalid
+    }
+    
     // Only redirect artists and hosts (both get Dokan vendor accounts)
     $user_type = strtolower(trim(rgar($entry, HSD_FIELD_USER_ROLE)));
     
@@ -831,26 +873,39 @@ function hsd_redirect_vendors_to_store_settings($confirmation, $form, $entry, $a
         return $confirmation;
     }
     
-    // Get auto-login token from entry meta
-    $login_token = gform_get_meta($entry['id'], 'hsd_auto_login_token');
+    // Get auto-login token from entry meta (safely)
+    $login_token = '';
+    if (isset($entry['id']) && function_exists('gform_get_meta')) {
+        $login_token = gform_get_meta($entry['id'], 'hsd_auto_login_token');
+    }
+    
     $email = rgar($entry, '1'); // Email field
     
-    // Redirect to login page with auto-login script
-    // This will auto-fill the form, solve the captcha, and submit
-    $login_url = 'https://houseshowsdirect.com/login/';
-    
-    // JavaScript to auto-login through MemberPress login form
-    $js_redirect = '<script type="text/javascript">
-        (function() {
-            var loginUrl = "' . esc_js($login_url) . '";
-            var redirectUrl = "' . esc_js($store_settings_url) . '";
-            var email = "' . esc_js($email) . '";
-            var token = "' . esc_js($login_token) . '";
-            
-            // Redirect to login page first
-            window.location.href = loginUrl + (loginUrl.indexOf("?") > -1 ? "&" : "?") + "hsd_auto_login=" + token + "&redirect_to=" + encodeURIComponent(redirectUrl);
-        })();
-    </script>';
+    // If no token, just redirect to store settings (user will need to log in manually)
+    if (empty($login_token)) {
+        // Fallback: simple redirect without auto-login
+        $js_redirect = '<script type="text/javascript">
+            setTimeout(function() {
+                window.location.href = "' . esc_js($store_settings_url) . '";
+            }, 2000);
+        </script>';
+    } else {
+        // Redirect to login page with auto-login script
+        // This will auto-fill the form, solve the captcha, and submit
+        $login_url = 'https://houseshowsdirect.com/login/';
+        
+        // JavaScript to auto-login through MemberPress login form
+        $js_redirect = '<script type="text/javascript">
+            (function() {
+                var loginUrl = "' . esc_js($login_url) . '";
+                var redirectUrl = "' . esc_js($store_settings_url) . '";
+                var token = "' . esc_js($login_token) . '";
+                
+                // Redirect to login page first
+                window.location.href = loginUrl + (loginUrl.indexOf("?") > -1 ? "&" : "?") + "hsd_auto_login=" + token + "&redirect_to=" + encodeURIComponent(redirectUrl);
+            })();
+        </script>';
+    }
     
     // Also add a script that will run on the login page to auto-submit
     // This will be handled by a separate function that hooks into the login page
