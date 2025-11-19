@@ -237,6 +237,14 @@ function hsd_unified_user_setup($user_id, $feed, $entry, $password) {
         hsd_setup_woocommerce_customer($user_id, $entry, false);
     }
     
+    // Automatically log the user in after registration (industry standard)
+    // This ensures users don't have to manually log in after submitting the form
+    if (!is_user_logged_in() || get_current_user_id() != $user_id) {
+        wp_set_current_user($user_id);
+        wp_set_auth_cookie($user_id, true); // true = remember user
+        hsd_log("User automatically logged in after registration (User ID: {$user_id})");
+    }
+    
     hsd_log("Registration complete for User ID: {$user_id}");
 }
 
@@ -610,6 +618,62 @@ function hsd_validate_payment_method_conditional($result, $value, $form, $field)
     }
     
     return $result;
+}
+
+// ============================================================================
+// REDIRECT VENDORS (ARTISTS & HOSTS) TO DOKAN STORE SETTINGS
+// ============================================================================
+
+/**
+ * Redirect artists and hosts to their Dokan store settings page after registration
+ * 
+ * Industry Standard: Auto-login after registration (configured in Gravity Forms User Registration addon)
+ * This adds a JavaScript redirect in the confirmation message for vendors.
+ * 
+ * Safe approach: Only modifies confirmation output, doesn't hook into critical WordPress functions
+ */
+add_filter('gform_confirmation_' . HSD_REGISTRATION_FORM_ID, 'hsd_redirect_vendors_to_store_settings', 10, 4);
+
+function hsd_redirect_vendors_to_store_settings($confirmation, $form, $entry, $ajax) {
+    // Only redirect artists and hosts (both get Dokan vendor accounts)
+    $user_type = strtolower(trim(rgar($entry, HSD_FIELD_USER_ROLE)));
+    
+    if (!in_array($user_type, array('artist', 'host'))) {
+        return $confirmation; // Return unchanged for fans and supporters
+    }
+    
+    $store_settings_url = 'https://houseshowsdirect.com/dashboard/settings/store/';
+    
+    // If confirmation is already a redirect array, modify it
+    if (is_array($confirmation) && isset($confirmation['redirect'])) {
+        $confirmation['redirect'] = $store_settings_url;
+        return $confirmation;
+    }
+    
+    // Otherwise, add JavaScript redirect to confirmation message
+    // This waits for Gravity Forms to complete login, then redirects
+    $js_redirect = '<script type="text/javascript">
+        setTimeout(function() {
+            window.location.href = "' . esc_js($store_settings_url) . '";
+        }, 2000);
+    </script>';
+    
+    // Handle different confirmation formats
+    if (is_string($confirmation)) {
+        // String confirmation - append JavaScript
+        return $confirmation . $js_redirect;
+    } elseif (is_array($confirmation)) {
+        // Array confirmation - add to message if exists, otherwise create redirect
+        if (isset($confirmation['message'])) {
+            $confirmation['message'] .= $js_redirect;
+        } else {
+            $confirmation['redirect'] = $store_settings_url;
+        }
+        return $confirmation;
+    }
+    
+    // Fallback: return redirect array
+    return array('redirect' => $store_settings_url);
 }
 
 // ============================================================================
