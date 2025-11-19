@@ -240,6 +240,13 @@ function hsd_unified_user_setup($user_id, $feed, $entry, $password) {
     }
     
     // Store password temporarily for auto-login (will be used by login page script)
+    // Get user object first
+    $user = get_userdata($user_id);
+    if (!$user) {
+        hsd_log("ERROR: Could not get user data for User ID: {$user_id}");
+        return;
+    }
+    
     // Get username from form field (ID 3) first, fallback to WordPress username
     $form_username = rgar($entry, HSD_FIELD_USERNAME);
     $login_username = !empty($form_username) ? $form_username : $user->user_login;
@@ -258,8 +265,10 @@ function hsd_unified_user_setup($user_id, $feed, $entry, $password) {
             'password' => $user_password // Store temporarily for auto-login
         ), 300); // 5 minutes, auto-deletes
         
-        // Store token in entry meta for redirect function to retrieve
-        gform_update_meta($entry['id'], 'hsd_auto_login_token', $login_token);
+        // Store token in entry meta for redirect function to retrieve (safely)
+        if (function_exists('gform_update_meta') && isset($entry['id'])) {
+            gform_update_meta($entry['id'], 'hsd_auto_login_token', $login_token);
+        }
         hsd_log("Auto-login token created for User ID: {$user_id} (username: {$login_username}, password from " . (!empty($form_password) ? 'form field' : 'hook parameter') . ")");
     }
     
