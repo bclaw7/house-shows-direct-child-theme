@@ -717,9 +717,46 @@ function hsd_ensure_user_login_after_registration($entry, $form) {
             return;
         }
         
-        // This function is kept for potential future use
-        // Currently, login is handled in hsd_unified_user_setup
-        // No action needed here for now
+        // Get user ID from entry
+        $user_id = rgar($entry, 'created_by');
+        if (!$user_id) {
+            // Try to get user by email
+            $email = rgar($entry, '1'); // Email field
+            if ($email) {
+                $user = get_user_by('email', $email);
+                if ($user) {
+                    $user_id = $user->ID;
+                }
+            }
+        }
+        
+        if (!$user_id) {
+            return;
+        }
+        
+        // Get user type to determine if we should log them in
+        $user_type = strtolower(trim(rgar($entry, HSD_FIELD_USER_ROLE)));
+        
+        // Only auto-login artists and hosts (they need to be redirected)
+        if (!in_array($user_type, array('artist', 'host'))) {
+            return;
+        }
+        
+        // Get password from form field (ID 4)
+        $password = rgar($entry, HSD_FIELD_PASSWORD);
+        
+        // Log the user in programmatically
+        if (!empty($password)) {
+            // Use WordPress login function
+            $user = get_userdata($user_id);
+            if ($user) {
+                // Set auth cookie and current user
+                wp_set_current_user($user_id);
+                wp_set_auth_cookie($user_id, true); // true = remember user
+                
+                hsd_log("User auto-logged in after registration (User ID: {$user_id}, Type: {$user_type})");
+            }
+        }
     } catch (Exception $e) {
         // Log error but don't break the site
         if (function_exists('hsd_log')) {
@@ -916,7 +953,8 @@ function hsd_add_auto_login_script_to_login_page() {
  * 
  * Safe approach: Only modifies confirmation output, doesn't hook into critical WordPress functions
  */
-add_filter('gform_confirmation_' . HSD_REGISTRATION_FORM_ID, 'hsd_redirect_vendors_to_store_settings', 10, 4);
+// Use higher priority (20) to override Gravity Forms User Registration default redirect
+add_filter('gform_confirmation_' . HSD_REGISTRATION_FORM_ID, 'hsd_redirect_vendors_to_store_settings', 20, 4);
 
 function hsd_redirect_vendors_to_store_settings($confirmation, $form, $entry, $ajax) {
     // Wrap in try-catch to prevent fatal errors
@@ -938,64 +976,21 @@ function hsd_redirect_vendors_to_store_settings($confirmation, $form, $entry, $a
             return $confirmation; // Return unchanged for fans and supporters
         }
         
-        $store_settings_url = 'https://houseshowsdirect.com/dashboard/settings/store/';
-        
-        // If confirmation is already a redirect array, modify it
-        if (is_array($confirmation) && isset($confirmation['redirect'])) {
-            $confirmation['redirect'] = $store_settings_url;
-            return $confirmation;
-        }
-        
-        // Get auto-login token from entry meta (safely)
-        $login_token = '';
-        if (isset($entry['id']) && function_exists('gform_get_meta')) {
-            $login_token = gform_get_meta($entry['id'], 'hsd_auto_login_token');
-        }
-        
-        $email = rgar($entry, '1'); // Email field
-        
-        // If no token, just redirect to store settings (user will need to log in manually)
-        if (empty($login_token)) {
-            // Fallback: simple redirect without auto-login
-            $js_redirect = '<script type="text/javascript">
-                setTimeout(function() {
-                    window.location.href = "' . esc_js($store_settings_url) . '";
-                }, 2000);
-            </script>';
+        // Determine redirect URL based on user type
+        if ($user_type === 'artist') {
+            $redirect_url = 'https://houseshowsdirect.com/artist-home/';
+        } elseif ($user_type === 'host') {
+            $redirect_url = 'https://houseshowsdirect.com/host-home/';
         } else {
-            // Redirect to login page with auto-login script
-            // This will auto-fill the form, solve the captcha, and submit
-            $login_url = 'https://houseshowsdirect.com/login/';
-            
-            // JavaScript to auto-login through MemberPress login form
-            $js_redirect = '<script type="text/javascript">
-                (function() {
-                    var loginUrl = "' . esc_js($login_url) . '";
-                    var redirectUrl = "' . esc_js($store_settings_url) . '";
-                    var token = "' . esc_js($login_token) . '";
-                    
-                    // Redirect to login page first
-                    window.location.href = loginUrl + (loginUrl.indexOf("?") > -1 ? "&" : "?") + "hsd_auto_login=" + token + "&redirect_to=" + encodeURIComponent(redirectUrl);
-                })();
-            </script>';
+            // Fallback (shouldn't happen, but just in case)
+            $redirect_url = 'https://houseshowsdirect.com/dashboard/settings/store/';
         }
         
-        // Handle different confirmation formats
-        if (is_string($confirmation)) {
-            // String confirmation - append JavaScript
-            return $confirmation . $js_redirect;
-        } elseif (is_array($confirmation)) {
-            // Array confirmation - add to message if exists, otherwise create redirect
-            if (isset($confirmation['message'])) {
-                $confirmation['message'] .= $js_redirect;
-            } else {
-                $confirmation['redirect'] = $store_settings_url;
-            }
-            return $confirmation;
-        }
-        
-        // Fallback: return redirect array
-        return array('redirect' => $store_settings_url);
+        // ALWAYS return redirect array to override any default Gravity Forms redirects
+        // User should already be logged in by hsd_ensure_user_login_after_registration
+        return array(
+            'redirect' => $redirect_url
+        );
     } catch (Exception $e) {
         // Log error but don't break the site
         if (function_exists('hsd_log')) {
