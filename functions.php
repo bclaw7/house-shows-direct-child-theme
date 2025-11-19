@@ -295,9 +295,6 @@ function hsd_unified_user_setup($user_id, $feed, $entry, $password) {
             gform_update_meta($entry['id'], 'hsd_auto_login_token', $login_token);
         }
         hsd_log("Auto-login token created for User ID: {$user_id} (username: {$login_username}, password from " . (!empty($form_password) ? 'form field' : 'hook parameter') . ")");
-        
-        // Auto-login immediately after registration for artists/hosts
-        hsd_auto_login_user($login_username, $user_password);
         }
         
         hsd_log("Registration complete for User ID: {$user_id}");
@@ -708,246 +705,15 @@ function hsd_ajax_check_login() {
 add_action('gform_post_submission_' . HSD_REGISTRATION_FORM_ID, 'hsd_ensure_user_login_after_registration', 10, 2);
 
 function hsd_ensure_user_login_after_registration($entry, $form) {
-    // Wrap in try-catch to prevent fatal errors
-    try {
-        // Safety check: ensure Gravity Forms functions are available
-        if (!function_exists('rgar')) {
-            return;
-        }
-        
-        // Validate entry data
-        if (!is_array($entry)) {
-            return;
-        }
-        
-        // Get user ID from entry
-        $user_id = rgar($entry, 'created_by');
-        if (!$user_id) {
-            // Try to get user by email
-            $email = rgar($entry, '1'); // Email field
-            if ($email) {
-                $user = get_user_by('email', $email);
-                if ($user) {
-                    $user_id = $user->ID;
-                }
-            }
-        }
-        
-        if (!$user_id) {
-            return;
-        }
-        
-        // Get user type to determine if we should log them in
-        $user_type = strtolower(trim(rgar($entry, HSD_FIELD_USER_ROLE)));
-        
-        // Only auto-login artists and hosts (they need to be redirected)
-        if (!in_array($user_type, array('artist', 'host'))) {
-            return;
-        }
-        
-        // Get password from form field (ID 4)
-        $password = rgar($entry, HSD_FIELD_PASSWORD);
-        
-        // Fetch user data
-        $user = get_userdata($user_id);
-        if (!$user) {
-            return;
-        }
-
-        // Attempt to auto-login using username and password
-        $form_username = rgar($entry, HSD_FIELD_USERNAME);
-        $login_username = !empty($form_username) ? $form_username : $user->user_login;
-        
-        if (!empty($login_username) && !empty($password)) {
-            hsd_auto_login_user($login_username, $password, $user_type);
-        }
-    } catch (Exception $e) {
-        // Log error but don't break the site
-        if (function_exists('hsd_log')) {
-            hsd_log("ERROR in hsd_ensure_user_login_after_registration: " . $e->getMessage());
-        }
-    }
+    // Placeholder for future logic; currently no action required
+    return;
 }
 
 /**
  * Add auto-login script to login page when hsd_auto_login parameter is present
- * This will auto-fill the form, solve the math captcha, and submit
+ * Temporarily disabled (no longer needed)
  */
-add_action('wp_footer', 'hsd_add_auto_login_script_to_login_page', 999);
-
-function hsd_add_auto_login_script_to_login_page() {
-    // Exit immediately if auto-login parameter is not present (most common case)
-    if (!isset($_GET['hsd_auto_login']) || empty($_GET['hsd_auto_login'])) {
-        return;
-    }
-    
-    // Wrap in try-catch to prevent fatal errors
-    try {
-        
-        // Only run on login page (check URL or page slug)
-        $current_url = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
-        $is_login_page = false;
-        
-        // Check if URL contains /login
-        if (!empty($current_url) && strpos($current_url, '/login') !== false) {
-            $is_login_page = true;
-        }
-        
-        // Check if it's the login page via WordPress function
-        if (!$is_login_page && function_exists('is_page') && is_page('login')) {
-            $is_login_page = true;
-        }
-        
-        // Check if it's BuddyPress register page
-        if (!$is_login_page && function_exists('bp_is_register_page') && bp_is_register_page()) {
-            $is_login_page = true;
-        }
-        
-        // Only proceed if we're on a login page
-        if (!$is_login_page) {
-            return;
-        }
-        
-        // Don't run if user is already logged in
-        if (is_user_logged_in()) {
-            return;
-        }
-        
-        // Sanitize token
-        $token = isset($_GET['hsd_auto_login']) ? sanitize_text_field($_GET['hsd_auto_login']) : '';
-        if (empty($token)) {
-            return;
-        }
-        
-        $redirect_to = isset($_GET['redirect_to']) ? esc_url_raw($_GET['redirect_to']) : '';
-        $store_settings_url = 'https://houseshowsdirect.com/dashboard/settings/store/';
-        
-        // Get login credentials from transient
-        $login_data = get_transient('hsd_auto_login_' . $token);
-        
-        // Exit if no valid login data
-        if (!$login_data || !is_array($login_data) || !isset($login_data['username']) || !isset($login_data['password'])) {
-            return; // Token expired or invalid
-        }
-        
-        // Validate we have required data
-        if (empty($login_data['username']) || empty($login_data['password'])) {
-            return;
-        }
-        
-        $username = esc_js($login_data['username']);
-        $password = esc_js($login_data['password']);
-        $math_answer = '17'; // 12 + 5 = 17
-        
-        // Delete the transient immediately for security
-        delete_transient('hsd_auto_login_' . $token);
-        
-        // JavaScript to auto-fill and submit login form
-        ?>
-        <script type="text/javascript">
-    (function() {
-        function autoLogin() {
-            // Find username/email field (could be 'log' or 'user_login' or email input)
-            var usernameField = document.querySelector('input[name="log"]') || 
-                               document.querySelector('input[name="user_login"]') ||
-                               document.querySelector('input[type="email"]') ||
-                               document.querySelector('input[name="username"]');
-            
-            // Find password field
-            var passwordField = document.querySelector('input[name="pwd"]') || 
-                               document.querySelector('input[name="user_pass"]') ||
-                               document.querySelector('input[type="password"]');
-            
-            // Find math captcha field (MemberPress math captcha)
-            // The span ID is mepr_math_captcha-691d39257ddc1, input should be nearby
-            var captchaField = document.querySelector('input[name="mepr_math_captcha"]') ||
-                              document.querySelector('input[id*="mepr_math_captcha"]') ||
-                              document.querySelector('input[type="text"][placeholder*="answer"]');
-            
-            // Try to find via span if not found yet
-            if (!captchaField) {
-                var captchaSpan = document.querySelector('span[id*="mepr_math_captcha"]');
-                if (captchaSpan) {
-                    captchaField = captchaSpan.parentElement ? captchaSpan.parentElement.querySelector('input[type="text"]') : null;
-                    if (!captchaField) {
-                        captchaField = document.querySelector('span[id*="mepr_math_captcha"] + input');
-                    }
-                }
-            }
-            
-            // Find login form
-            var loginForm = document.querySelector('form#loginform') ||
-                           document.querySelector('form[name="loginform"]') ||
-                           document.querySelector('form[action*="login"]');
-            
-            if (usernameField && passwordField && loginForm) {
-                // Fill in username
-                usernameField.value = '<?php echo $username; ?>';
-                usernameField.dispatchEvent(new Event('input', { bubbles: true }));
-                usernameField.dispatchEvent(new Event('change', { bubbles: true }));
-                
-                // Fill in password
-                passwordField.value = '<?php echo $password; ?>';
-                passwordField.dispatchEvent(new Event('input', { bubbles: true }));
-                passwordField.dispatchEvent(new Event('change', { bubbles: true }));
-                
-                // Fill in math captcha answer (12 + 5 = 17)
-                if (captchaField) {
-                    captchaField.value = '<?php echo $math_answer; ?>';
-                    captchaField.dispatchEvent(new Event('input', { bubbles: true }));
-                    captchaField.dispatchEvent(new Event('change', { bubbles: true }));
-                }
-                
-                // Check "Remember Me" if present
-                var rememberMe = document.querySelector('input[name="rememberme"]');
-                if (rememberMe) {
-                    rememberMe.checked = true;
-                }
-                
-                // Set redirect_to in form if not already set
-                var redirectInput = document.querySelector('input[name="redirect_to"]');
-                var redirectTo = '<?php echo esc_js($redirect_to ? $redirect_to : $store_settings_url); ?>';
-                if (redirectInput) {
-                    redirectInput.value = redirectTo;
-                } else {
-                    // Create hidden input for redirect
-                    var hiddenInput = document.createElement('input');
-                    hiddenInput.type = 'hidden';
-                    hiddenInput.name = 'redirect_to';
-                    hiddenInput.value = redirectTo;
-                    loginForm.appendChild(hiddenInput);
-                }
-                
-                // Wait a moment for fields to be recognized, then submit
-                setTimeout(function() {
-                    loginForm.submit();
-                }, 500);
-            } else {
-                // Retry if form not found yet
-                setTimeout(autoLogin, 500);
-            }
-        }
-        
-        // Start auto-login after page loads
-        if (document.readyState === 'complete') {
-            setTimeout(autoLogin, 1000);
-        } else {
-            window.addEventListener('load', function() {
-                setTimeout(autoLogin, 1000);
-            });
-        }
-    })();
-    </script>
-    <?php
-    } catch (Exception $e) {
-        // Log error but don't break the site
-        if (function_exists('hsd_log')) {
-            hsd_log("Error in auto-login script: " . $e->getMessage());
-        }
-        // Silently fail - don't output anything
-        return;
-    }
-}
+// add_action('wp_footer', 'hsd_add_auto_login_script_to_login_page', 999);
 
 /**
  * Redirect artists and hosts to their Dokan store settings page after registration
@@ -980,20 +746,9 @@ function hsd_redirect_vendors_to_store_settings($confirmation, $form, $entry, $a
             return $confirmation; // Return unchanged for fans and supporters
         }
         
-        // Determine redirect URL based on user type
-        if ($user_type === 'artist') {
-            $redirect_url = 'https://houseshowsdirect.com/artist-home/';
-        } elseif ($user_type === 'host') {
-            $redirect_url = 'https://houseshowsdirect.com/host-home/';
-        } else {
-            // Fallback (shouldn't happen, but just in case)
-            $redirect_url = 'https://houseshowsdirect.com/dashboard/settings/store/';
-        }
-        
-        // ALWAYS return redirect array to override any default Gravity Forms redirects
-        // User should already be logged in by hsd_ensure_user_login_after_registration
+        // Simple approach: send user to login page after registration
         return array(
-            'redirect' => $redirect_url
+            'redirect' => 'https://houseshowsdirect.com/login/'
         );
     } catch (Exception $e) {
         // Log error but don't break the site
