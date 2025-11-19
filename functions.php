@@ -675,10 +675,8 @@ add_action('gform_post_submission_' . HSD_REGISTRATION_FORM_ID, 'hsd_ensure_user
 /**
  * Add auto-login script to login page when hsd_auto_login parameter is present
  * This will auto-fill the form, solve the math captcha, and submit
- * 
- * TEMPORARILY DISABLED - Re-enable after testing
  */
-// add_action('wp_footer', 'hsd_add_auto_login_script_to_login_page', 999);
+add_action('wp_footer', 'hsd_add_auto_login_script_to_login_page', 999);
 
 function hsd_add_auto_login_script_to_login_page() {
     // Exit immediately if auto-login parameter is not present (most common case)
