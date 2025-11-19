@@ -106,6 +106,8 @@ add_filter( 'wp_mail_from_name', function ( $original_email_from ) {
 define('HSD_REGISTRATION_FORM_ID', 11);
 
 // Gravity Forms Field IDs (find these in your form editor)
+define('HSD_FIELD_USERNAME', '3');               // Username field
+define('HSD_FIELD_PASSWORD', '4');               // Password field
 define('HSD_FIELD_USER_ROLE', '5');              // Role selection field (Fan/Supporter/Host/Artist)
 define('HSD_FIELD_DISPLAY_NAME', '6');           // Display Name (Artist Name/Venue Name/Nickname/Display Name)
 define('HSD_FIELD_PHONE', '19');                 // Phone number
@@ -237,12 +239,28 @@ function hsd_unified_user_setup($user_id, $feed, $entry, $password) {
         hsd_setup_woocommerce_customer($user_id, $entry, false);
     }
     
-    // Automatically log the user in after registration (industry standard)
-    // This ensures users don't have to manually log in after submitting the form
-    if (!is_user_logged_in() || get_current_user_id() != $user_id) {
-        wp_set_current_user($user_id);
-        wp_set_auth_cookie($user_id, true); // true = remember user
-        hsd_log("User automatically logged in after registration (User ID: {$user_id})");
+    // Store password temporarily for auto-login (will be used by login page script)
+    // Get username from form field (ID 3) first, fallback to WordPress username
+    $form_username = rgar($entry, HSD_FIELD_USERNAME);
+    $login_username = !empty($form_username) ? $form_username : $user->user_login;
+    
+    // Get password from form field (ID 4) first, fallback to hook parameter
+    $form_password = rgar($entry, HSD_FIELD_PASSWORD);
+    $user_password = !empty($form_password) ? $form_password : $password;
+    
+    // Only store if we have a password (for artists and hosts who need redirect)
+    if (!empty($user_password) && in_array($user_type, array('artist', 'host'))) {
+        $login_token = wp_generate_password(32, false);
+        set_transient('hsd_auto_login_' . $login_token, array(
+            'user_id' => $user_id,
+            'username' => $login_username, // Use username from form field
+            'email' => $user->user_email,
+            'password' => $user_password // Store temporarily for auto-login
+        ), 300); // 5 minutes, auto-deletes
+        
+        // Store token in entry meta for redirect function to retrieve
+        gform_update_meta($entry['id'], 'hsd_auto_login_token', $login_token);
+        hsd_log("Auto-login token created for User ID: {$user_id} (username: {$login_username}, password from " . (!empty($form_password) ? 'form field' : 'hook parameter') . ")");
     }
     
     hsd_log("Registration complete for User ID: {$user_id}");
@@ -625,9 +643,172 @@ function hsd_validate_payment_method_conditional($result, $value, $form, $field)
 // ============================================================================
 
 /**
+ * AJAX endpoint to check if user is logged in
+ * Used by JavaScript to verify login status before redirecting
+ */
+add_action('wp_ajax_hsd_check_login', 'hsd_ajax_check_login');
+add_action('wp_ajax_nopriv_hsd_check_login', 'hsd_ajax_check_login');
+
+function hsd_ajax_check_login() {
+    if (is_user_logged_in()) {
+        wp_send_json_success(array('logged_in' => true, 'user_id' => get_current_user_id()));
+    } else {
+        wp_send_json_error(array('logged_in' => false));
+    }
+}
+
+/**
+ * Ensure user is logged in after form submission
+ * This hook runs after the form is submitted and entry is saved
+ */
+add_action('gform_post_submission_' . HSD_REGISTRATION_FORM_ID, 'hsd_ensure_user_login_after_registration', 10, 2);
+
+/**
+ * Add auto-login script to login page when hsd_auto_login parameter is present
+ * This will auto-fill the form, solve the math captcha, and submit
+ */
+add_action('wp_footer', 'hsd_add_auto_login_script_to_login_page');
+
+function hsd_add_auto_login_script_to_login_page() {
+    // Check if auto-login parameter is present
+    if (!isset($_GET['hsd_auto_login']) || empty($_GET['hsd_auto_login'])) {
+        return;
+    }
+    
+    // Only run on login page (check URL or page slug)
+    $current_url = $_SERVER['REQUEST_URI'] ?? '';
+    $is_login_page = (
+        strpos($current_url, '/login') !== false ||
+        is_page('login') ||
+        (function_exists('bp_is_register_page') && bp_is_register_page())
+    );
+    
+    // Don't run if user is already logged in (unless on login page)
+    if (!$is_login_page && is_user_logged_in()) {
+        return;
+    }
+    
+    $token = sanitize_text_field($_GET['hsd_auto_login']);
+    $redirect_to = isset($_GET['redirect_to']) ? esc_url_raw($_GET['redirect_to']) : '';
+    $store_settings_url = 'https://houseshowsdirect.com/dashboard/settings/store/';
+    
+    // Get login credentials from transient
+    $login_data = get_transient('hsd_auto_login_' . $token);
+    
+    if (!$login_data || !isset($login_data['username']) || !isset($login_data['password'])) {
+        return; // Token expired or invalid
+    }
+    
+    $username = esc_js($login_data['username']);
+    $password = esc_js($login_data['password']);
+    $math_answer = '17'; // 12 + 5 = 17
+    
+    // Delete the transient immediately for security
+    delete_transient('hsd_auto_login_' . $token);
+    
+    // JavaScript to auto-fill and submit login form
+    ?>
+    <script type="text/javascript">
+    (function() {
+        function autoLogin() {
+            // Find username/email field (could be 'log' or 'user_login' or email input)
+            var usernameField = document.querySelector('input[name="log"]') || 
+                               document.querySelector('input[name="user_login"]') ||
+                               document.querySelector('input[type="email"]') ||
+                               document.querySelector('input[name="username"]');
+            
+            // Find password field
+            var passwordField = document.querySelector('input[name="pwd"]') || 
+                               document.querySelector('input[name="user_pass"]') ||
+                               document.querySelector('input[type="password"]');
+            
+            // Find math captcha field (MemberPress math captcha)
+            // The span ID is mepr_math_captcha-691d39257ddc1, input should be nearby
+            var captchaField = document.querySelector('input[name="mepr_math_captcha"]') ||
+                              document.querySelector('input[id*="mepr_math_captcha"]') ||
+                              document.querySelector('input[type="text"][placeholder*="answer"]');
+            
+            // Try to find via span if not found yet
+            if (!captchaField) {
+                var captchaSpan = document.querySelector('span[id*="mepr_math_captcha"]');
+                if (captchaSpan) {
+                    captchaField = captchaSpan.parentElement ? captchaSpan.parentElement.querySelector('input[type="text"]') : null;
+                    if (!captchaField) {
+                        captchaField = document.querySelector('span[id*="mepr_math_captcha"] + input');
+                    }
+                }
+            }
+            
+            // Find login form
+            var loginForm = document.querySelector('form#loginform') ||
+                           document.querySelector('form[name="loginform"]') ||
+                           document.querySelector('form[action*="login"]');
+            
+            if (usernameField && passwordField && loginForm) {
+                // Fill in username
+                usernameField.value = '<?php echo $username; ?>';
+                usernameField.dispatchEvent(new Event('input', { bubbles: true }));
+                usernameField.dispatchEvent(new Event('change', { bubbles: true }));
+                
+                // Fill in password
+                passwordField.value = '<?php echo $password; ?>';
+                passwordField.dispatchEvent(new Event('input', { bubbles: true }));
+                passwordField.dispatchEvent(new Event('change', { bubbles: true }));
+                
+                // Fill in math captcha answer (12 + 5 = 17)
+                if (captchaField) {
+                    captchaField.value = '<?php echo $math_answer; ?>';
+                    captchaField.dispatchEvent(new Event('input', { bubbles: true }));
+                    captchaField.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                
+                // Check "Remember Me" if present
+                var rememberMe = document.querySelector('input[name="rememberme"]');
+                if (rememberMe) {
+                    rememberMe.checked = true;
+                }
+                
+                // Set redirect_to in form if not already set
+                var redirectInput = document.querySelector('input[name="redirect_to"]');
+                var redirectTo = '<?php echo esc_js($redirect_to ? $redirect_to : $store_settings_url); ?>';
+                if (redirectInput) {
+                    redirectInput.value = redirectTo;
+                } else {
+                    // Create hidden input for redirect
+                    var hiddenInput = document.createElement('input');
+                    hiddenInput.type = 'hidden';
+                    hiddenInput.name = 'redirect_to';
+                    hiddenInput.value = redirectTo;
+                    loginForm.appendChild(hiddenInput);
+                }
+                
+                // Wait a moment for fields to be recognized, then submit
+                setTimeout(function() {
+                    loginForm.submit();
+                }, 500);
+            } else {
+                // Retry if form not found yet
+                setTimeout(autoLogin, 500);
+            }
+        }
+        
+        // Start auto-login after page loads
+        if (document.readyState === 'complete') {
+            setTimeout(autoLogin, 1000);
+        } else {
+            window.addEventListener('load', function() {
+                setTimeout(autoLogin, 1000);
+            });
+        }
+    })();
+    </script>
+    <?php
+}
+
+/**
  * Redirect artists and hosts to their Dokan store settings page after registration
  * 
- * Industry Standard: Auto-login after registration (configured in Gravity Forms User Registration addon)
+ * Industry Standard: Auto-login after registration
  * This adds a JavaScript redirect in the confirmation message for vendors.
  * 
  * Safe approach: Only modifies confirmation output, doesn't hook into critical WordPress functions
@@ -650,13 +831,29 @@ function hsd_redirect_vendors_to_store_settings($confirmation, $form, $entry, $a
         return $confirmation;
     }
     
-    // Otherwise, add JavaScript redirect to confirmation message
-    // This waits for Gravity Forms to complete login, then redirects
+    // Get auto-login token from entry meta
+    $login_token = gform_get_meta($entry['id'], 'hsd_auto_login_token');
+    $email = rgar($entry, '1'); // Email field
+    
+    // Redirect to login page with auto-login script
+    // This will auto-fill the form, solve the captcha, and submit
+    $login_url = 'https://houseshowsdirect.com/login/';
+    
+    // JavaScript to auto-login through MemberPress login form
     $js_redirect = '<script type="text/javascript">
-        setTimeout(function() {
-            window.location.href = "' . esc_js($store_settings_url) . '";
-        }, 2000);
+        (function() {
+            var loginUrl = "' . esc_js($login_url) . '";
+            var redirectUrl = "' . esc_js($store_settings_url) . '";
+            var email = "' . esc_js($email) . '";
+            var token = "' . esc_js($login_token) . '";
+            
+            // Redirect to login page first
+            window.location.href = loginUrl + (loginUrl.indexOf("?") > -1 ? "&" : "?") + "hsd_auto_login=" + token + "&redirect_to=" + encodeURIComponent(redirectUrl);
+        })();
     </script>';
+    
+    // Also add a script that will run on the login page to auto-submit
+    // This will be handled by a separate function that hooks into the login page
     
     // Handle different confirmation formats
     if (is_string($confirmation)) {
