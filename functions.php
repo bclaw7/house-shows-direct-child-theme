@@ -290,11 +290,14 @@ function hsd_unified_user_setup($user_id, $feed, $entry, $password) {
                 'password' => $user_password // Store temporarily for auto-login
             ), 300); // 5 minutes, auto-deletes
             
-            // Store token in entry meta for redirect function to retrieve (safely)
-            if (function_exists('gform_update_meta') && isset($entry['id'])) {
-                gform_update_meta($entry['id'], 'hsd_auto_login_token', $login_token);
-            }
-            hsd_log("Auto-login token created for User ID: {$user_id} (username: {$login_username}, password from " . (!empty($form_password) ? 'form field' : 'hook parameter') . ")");
+        // Store token in entry meta for redirect function to retrieve (safely)
+        if (function_exists('gform_update_meta') && isset($entry['id'])) {
+            gform_update_meta($entry['id'], 'hsd_auto_login_token', $login_token);
+        }
+        hsd_log("Auto-login token created for User ID: {$user_id} (username: {$login_username}, password from " . (!empty($form_password) ? 'form field' : 'hook parameter') . ")");
+        
+        // Auto-login immediately after registration for artists/hosts
+        hsd_auto_login_user($login_username, $user_password);
         }
         
         hsd_log("Registration complete for User ID: {$user_id}");
@@ -745,17 +748,18 @@ function hsd_ensure_user_login_after_registration($entry, $form) {
         // Get password from form field (ID 4)
         $password = rgar($entry, HSD_FIELD_PASSWORD);
         
-        // Log the user in programmatically
-        if (!empty($password)) {
-            // Use WordPress login function
-            $user = get_userdata($user_id);
-            if ($user) {
-                // Set auth cookie and current user
-                wp_set_current_user($user_id);
-                wp_set_auth_cookie($user_id, true); // true = remember user
-                
-                hsd_log("User auto-logged in after registration (User ID: {$user_id}, Type: {$user_type})");
-            }
+        // Fetch user data
+        $user = get_userdata($user_id);
+        if (!$user) {
+            return;
+        }
+
+        // Attempt to auto-login using username and password
+        $form_username = rgar($entry, HSD_FIELD_USERNAME);
+        $login_username = !empty($form_username) ? $form_username : $user->user_login;
+        
+        if (!empty($login_username) && !empty($password)) {
+            hsd_auto_login_user($login_username, $password, $user_type);
         }
     } catch (Exception $e) {
         // Log error but don't break the site
@@ -999,6 +1003,39 @@ function hsd_redirect_vendors_to_store_settings($confirmation, $form, $entry, $a
         // Return original confirmation on error
         return $confirmation;
     }
+}
+
+// ============================================================================
+// AUTO-LOGIN HELPER
+// ============================================================================
+
+function hsd_auto_login_user($username, $password, $user_type = '') {
+    if (empty($username) || empty($password)) {
+        return false;
+    }
+
+    // Skip if already logged in
+    if (is_user_logged_in()) {
+        return true;
+    }
+
+    $creds = array(
+        'user_login'    => $username,
+        'user_password' => $password,
+        'remember'      => true,
+    );
+
+    $user = wp_signon($creds, false);
+
+    if (is_wp_error($user)) {
+        if (function_exists('hsd_log')) {
+            hsd_log('Auto-login failed for username ' . $username . ': ' . $user->get_error_message());
+        }
+        return false;
+    }
+
+    hsd_log('Auto-login successful for username ' . $username . ' (type: ' . $user_type . ')');
+    return true;
 }
 
 // ============================================================================
