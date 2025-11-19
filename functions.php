@@ -176,17 +176,30 @@ $HSD_BUDDYBOSS_TYPES = array(
 add_filter( 'gform_pre_submission_' . HSD_REGISTRATION_FORM_ID, 'hsd_merge_role_specific_display_names' );
 
 function hsd_merge_role_specific_display_names( $form ) {
-	$conditional_fields = array(
-		HSD_FIELD_DISPLAY_NAME        => rgpost( 'input_' . HSD_FIELD_DISPLAY_NAME ),
-		HSD_FIELD_DISPLAY_NAME_SUPPORTER => rgpost( 'input_' . HSD_FIELD_DISPLAY_NAME_SUPPORTER ),
-		HSD_FIELD_DISPLAY_NAME_HOST      => rgpost( 'input_' . HSD_FIELD_DISPLAY_NAME_HOST ),
-		HSD_FIELD_DISPLAY_NAME_FAN       => rgpost( 'input_' . HSD_FIELD_DISPLAY_NAME_FAN ),
-	);
+	// Wrap in try-catch to prevent fatal errors
+	try {
+		// Safety check: ensure Gravity Forms functions are available
+		if (!function_exists('rgpost')) {
+			return $form;
+		}
+		
+		$conditional_fields = array(
+			HSD_FIELD_DISPLAY_NAME        => rgpost( 'input_' . HSD_FIELD_DISPLAY_NAME ),
+			HSD_FIELD_DISPLAY_NAME_SUPPORTER => rgpost( 'input_' . HSD_FIELD_DISPLAY_NAME_SUPPORTER ),
+			HSD_FIELD_DISPLAY_NAME_HOST      => rgpost( 'input_' . HSD_FIELD_DISPLAY_NAME_HOST ),
+			HSD_FIELD_DISPLAY_NAME_FAN       => rgpost( 'input_' . HSD_FIELD_DISPLAY_NAME_FAN ),
+		);
 
-	foreach ( $conditional_fields as $value ) {
-		if ( ! empty( $value ) ) {
-			$_POST[ 'input_' . HSD_FIELD_DISPLAY_NAME ] = $value;
-			break;
+		foreach ( $conditional_fields as $value ) {
+			if ( ! empty( $value ) ) {
+				$_POST[ 'input_' . HSD_FIELD_DISPLAY_NAME ] = $value;
+				break;
+			}
+		}
+	} catch (Exception $e) {
+		// Log error but don't break the form
+		if (function_exists('hsd_log')) {
+			hsd_log("ERROR in hsd_merge_role_specific_display_names: " . $e->getMessage());
 		}
 	}
 
@@ -690,6 +703,30 @@ function hsd_ajax_check_login() {
  * This hook runs after the form is submitted and entry is saved
  */
 add_action('gform_post_submission_' . HSD_REGISTRATION_FORM_ID, 'hsd_ensure_user_login_after_registration', 10, 2);
+
+function hsd_ensure_user_login_after_registration($entry, $form) {
+    // Wrap in try-catch to prevent fatal errors
+    try {
+        // Safety check: ensure Gravity Forms functions are available
+        if (!function_exists('rgar')) {
+            return;
+        }
+        
+        // Validate entry data
+        if (!is_array($entry)) {
+            return;
+        }
+        
+        // This function is kept for potential future use
+        // Currently, login is handled in hsd_unified_user_setup
+        // No action needed here for now
+    } catch (Exception $e) {
+        // Log error but don't break the site
+        if (function_exists('hsd_log')) {
+            hsd_log("ERROR in hsd_ensure_user_login_after_registration: " . $e->getMessage());
+        }
+    }
+}
 
 /**
  * Add auto-login script to login page when hsd_auto_login parameter is present
