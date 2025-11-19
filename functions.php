@@ -666,16 +666,19 @@ add_action('gform_post_submission_' . HSD_REGISTRATION_FORM_ID, 'hsd_ensure_user
 /**
  * Add auto-login script to login page when hsd_auto_login parameter is present
  * This will auto-fill the form, solve the math captcha, and submit
+ * 
+ * TEMPORARILY DISABLED - Re-enable after testing
  */
-add_action('wp_footer', 'hsd_add_auto_login_script_to_login_page');
+// add_action('wp_footer', 'hsd_add_auto_login_script_to_login_page', 999);
 
 function hsd_add_auto_login_script_to_login_page() {
+    // Exit immediately if auto-login parameter is not present (most common case)
+    if (!isset($_GET['hsd_auto_login']) || empty($_GET['hsd_auto_login'])) {
+        return;
+    }
+    
     // Wrap in try-catch to prevent fatal errors
     try {
-        // Check if auto-login parameter is present - exit early if not
-        if (!isset($_GET['hsd_auto_login']) || empty($_GET['hsd_auto_login'])) {
-            return;
-        }
         
         // Only run on login page (check URL or page slug)
         $current_url = isset($_SERVER['REQUEST_URI']) ? $_SERVER['REQUEST_URI'] : '';
@@ -734,10 +737,10 @@ function hsd_add_auto_login_script_to_login_page() {
         
         // Delete the transient immediately for security
         delete_transient('hsd_auto_login_' . $token);
-    
-    // JavaScript to auto-fill and submit login form
-    ?>
-    <script type="text/javascript">
+        
+        // JavaScript to auto-fill and submit login form
+        ?>
+        <script type="text/javascript">
     (function() {
         function autoLogin() {
             // Find username/email field (could be 'log' or 'user_login' or email input)
