@@ -613,6 +613,60 @@ function hsd_validate_payment_method_conditional($result, $value, $form, $field)
 }
 
 // ============================================================================
+// REDIRECT VENDORS (ARTISTS & HOSTS) TO DOKAN STORE SETTINGS
+// ============================================================================
+
+/**
+ * Redirect artists and hosts to their Dokan store settings page after registration
+ * 
+ * Gravity Forms automatically logs users in after registration, so we just need
+ * to redirect them to the store settings page.
+ */
+add_filter('gform_confirmation_' . HSD_REGISTRATION_FORM_ID, 'hsd_redirect_vendors_to_store_settings', 10, 4);
+
+function hsd_redirect_vendors_to_store_settings($confirmation, $form, $entry, $ajax) {
+    // Redirect artists and hosts (both get Dokan vendor accounts)
+    $user_type = strtolower(trim(rgar($entry, HSD_FIELD_USER_ROLE)));
+    
+    if (in_array($user_type, array('artist', 'host'))) {
+        // Gravity Forms User Registration addon automatically logs users in after registration
+        // But we'll verify and handle edge cases
+        $user_id = get_current_user_id();
+        
+        // If not logged in, try to get user ID from entry email
+        if (!$user_id) {
+            $email = rgar($entry, '1'); // Email is typically field ID 1 in Gravity Forms
+            if ($email) {
+                $user = get_user_by('email', $email);
+                if ($user) {
+                    // Log them in
+                    wp_set_current_user($user->ID);
+                    wp_set_auth_cookie($user->ID);
+                    $user_id = $user->ID;
+                }
+            }
+        }
+        
+        // Redirect to Dokan store settings page
+        $store_settings_url = 'https://houseshowsdirect.com/dashboard/settings/store/';
+        
+        if ($user_id) {
+            hsd_log("Redirecting {$user_type} (User ID: {$user_id}) to store settings");
+        } else {
+            hsd_log("WARNING: Could not determine user ID for {$user_type} redirect");
+        }
+        
+        // Return redirect confirmation
+        return array(
+            'redirect' => $store_settings_url
+        );
+    }
+    
+    // Return original confirmation for non-vendor users (fan, supporter)
+    return $confirmation;
+}
+
+// ============================================================================
 // LOGGING FUNCTION
 // ============================================================================
 
