@@ -7,3 +7,7 @@
  .gform_wrapper.gf_browser_chrome form select {
     padding-top: 0px !important;
  }
+
+ #dokan-analytics-app .woocommerce-layout__header {
+   z-index: 1 !important;
+ }
