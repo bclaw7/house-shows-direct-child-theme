@@ -15,3 +15,8 @@
  #dokan-store-listing-filter-form-wrap .store-lists-other-filter-wrap .item {
   display: none;
  }
+
+ input[type='submit'].dokan-btn-theme, a.dokan-btn-theme, .dokan-btn-theme {
+  background-color: #EB0000 !important;
+  border-color: #000 !important;
+ }
