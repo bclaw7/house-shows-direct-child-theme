@@ -11,3 +11,7 @@
  #dokan-analytics-app .woocommerce-layout__header {
    z-index: 1 !important;
  }
+
+ #dokan-store-listing-filter-form-wrap .store-lists-other-filter-wrap .item {
+  display: none;
+ }
